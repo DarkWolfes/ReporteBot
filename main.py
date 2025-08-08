@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 
 # TU TOKEN DEL BOT
-BOT_TOKEN = '7625899075:AAGVcYR16FVc_IwXKLy--EPOyXnHmmkiw9k'
+BOT_TOKEN = 'TOKEN_BOT'
 
 # --- CONFIGURACIÓN DE ESTADOS DEL CONVERSATIONHANDLER ---
 MENU_STATE = 0
@@ -702,4 +702,5 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
+
     main()
