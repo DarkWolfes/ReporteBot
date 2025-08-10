@@ -1,6 +1,9 @@
 import sqlite3
 import logging
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, Chat, InlineKeyboardMarkup, InlineKeyboardButton, error
+import json
+import os
+from dotenv import load_dotenv
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, Chat, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -12,13 +15,24 @@ from telegram.ext import (
 )
 import re
 
+# --- CONFIGURACIÓN ---
+
+# Carga las variables de entorno desde un archivo .env
+load_dotenv()
+
+# Carga el token del bot desde el archivo .env por seguridad
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+
+# Si el token no existe en el archivo .env, avisa del error
+if not BOT_TOKEN:
+    logging.error("No se encontró el token del bot en el archivo .env. Por favor, crea un archivo .env y añade la línea: BOT_TOKEN='TU_TOKEN'")
+    exit()
+
 # Configuración del logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-
-# TU TOKEN DEL BOT
-BOT_TOKEN = 'TOKEN_BOT'
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # --- CONFIGURACIÓN DE ESTADOS DEL CONVERSATIONHANDLER ---
 MENU_STATE = 0
@@ -30,99 +44,94 @@ GET_REPORT_DESCRIPTION = 5
 GET_REPORT_PHOTO = 6
 AWAITING_RECONFIG_CONFIRMATION = 8
 
-# --- FUNCIONES DE BASE DE DATOS ---
+# --- FUNCIONES DE BASE DE DATOS (REFACTORIZADAS) ---
 def init_db():
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users_config (
-            user_id INTEGER PRIMARY KEY,
-            channel_id TEXT,
-            admin_ids TEXT,
-            is_configured BOOLEAN
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS group_to_channel_map (
-            group_id INTEGER PRIMARY KEY,
-            channel_id TEXT,
-            group_name TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users_config (
+                user_id INTEGER PRIMARY KEY,
+                channel_id TEXT,
+                admin_ids TEXT, -- Almacenado como JSON
+                is_configured BOOLEAN
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS group_to_channel_map (
+                group_id INTEGER PRIMARY KEY,
+                channel_id TEXT,
+                group_name TEXT
+            )
+        ''')
+        conn.commit()
 
 def get_user_config(user_id):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT channel_id, admin_ids, is_configured FROM users_config WHERE user_id = ?', (user_id,))
-    result = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT channel_id, admin_ids, is_configured FROM users_config WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone()
+        
     if result:
         channel_id, admin_ids_str, is_configured = result
         return {
             'channel_id': channel_id,
-            'admin_ids': [int(id) for id in admin_ids_str.split(',')] if admin_ids_str else [],
+            # Se deserializa la cadena JSON a una lista de Python
+            'admin_ids': json.loads(admin_ids_str) if admin_ids_str else [],
             'is_configured': bool(is_configured)
         }
     return None
 
 def save_user_config(user_id, channel_id, admin_ids, is_configured=True):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    admin_ids_str = ','.join(map(str, admin_ids))
-    cursor.execute('''
-        INSERT OR REPLACE INTO users_config (user_id, channel_id, admin_ids, is_configured) 
-        VALUES (?, ?, ?, ?)
-    ''', (user_id, channel_id, admin_ids_str, is_configured))
-    conn.commit()
-    conn.close()
+    # Se serializa la lista de IDs a una cadena JSON para guardarla
+    admin_ids_str = json.dumps(admin_ids)
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO users_config (user_id, channel_id, admin_ids, is_configured)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, channel_id, admin_ids_str, is_configured))
+        conn.commit()
 
 def delete_user_config(user_id):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM users_config WHERE user_id = ?', (user_id,))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM users_config WHERE user_id = ?', (user_id,))
+        conn.commit()
 
 def save_group_to_channel_map(group_id, channel_id, group_name):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO group_to_channel_map (group_id, channel_id, group_name) 
-        VALUES (?, ?, ?)
-    ''', (group_id, channel_id, group_name))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO group_to_channel_map (group_id, channel_id, group_name)
+            VALUES (?, ?, ?)
+        ''', (group_id, channel_id, group_name))
+        conn.commit()
 
 def delete_group_from_channel_map(group_id):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM group_to_channel_map WHERE group_id = ?', (group_id,))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM group_to_channel_map WHERE group_id = ?', (group_id,))
+        conn.commit()
 
 def delete_groups_for_channel_id(channel_id):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM group_to_channel_map WHERE channel_id = ?', (channel_id,))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM group_to_channel_map WHERE channel_id = ?', (channel_id,))
+        conn.commit()
 
 def get_channel_id_from_group_id(group_id):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT channel_id FROM group_to_channel_map WHERE group_id = ?', (group_id,))
-    result = cursor.fetchone()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT channel_id FROM group_to_channel_map WHERE group_id = ?', (group_id,))
+        result = cursor.fetchone()
+        
     return result[0] if result else None
 
 def get_groups_for_channel_id(channel_id):
-    conn = sqlite3.connect('bot_config.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT group_id, group_name FROM group_to_channel_map WHERE channel_id = ?', (channel_id,))
-    result = cursor.fetchall()
-    conn.close()
+    with sqlite3.connect('bot_config.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT group_id, group_name FROM group_to_channel_map WHERE channel_id = ?', (channel_id,))
+        result = cursor.fetchall()
     return result
 
 def is_admin(user_id):
@@ -244,16 +253,26 @@ async def get_channel_id_from_forward(update: Update, context: ContextTypes.DEFA
     channel_id = None
     text = update.message.text
     if text:
-        match = re.search(r"c\/(-?\d+)\/(\d+)", text)
-        if match:
-            channel_id_str = match.group(1)
-            channel_id = int(f"-100{channel_id_str}")
-        elif re.match(r"^-?\d+$", text):
-            channel_id = int(text)
+        # Lógica mejorada para obtener el ID de canal de un reenvío
+        try:
+            # Intenta obtener el ID de un mensaje reenviado. 
+            # (El chat reenviado aparece como 'forward_from_chat' si es un canal)
+            if update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
+                channel_id = update.message.forward_from_chat.id
+            # Si el usuario simplemente pega el ID numérico
+            elif re.match(r"^-?\d+$", text):
+                channel_id = int(text)
+            # Para enlaces de mensaje de canal, extrae el ID
+            elif re.search(r"t\.me\/c\/(-?\d+)\/(\d+)", text):
+                match = re.search(r"t\.me\/c\/(-?\d+)\/(\d+)", text)
+                channel_id_str = match.group(1)
+                channel_id = int(f"-100{channel_id_str}")
+        except Exception:
+            channel_id = None
 
     if not channel_id:
         await update.message.reply_text(
-            "❌ ¡Error! Por favor, asegúrate de que el mensaje que envías contiene un enlace de tu canal o el ID numérico."
+            "❌ ¡Error! Por favor, asegúrate de reenviar un mensaje del canal o de enviar el ID numérico del canal."
         )
         return GET_CHANNEL_ID_FROM_FORWARD
 
@@ -353,10 +372,18 @@ async def handle_check_reports_button(update: Update, context: ContextTypes.DEFA
 async def handle_back_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return await start_command(update, context)
 
-async def cancel_any_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("❌ Proceso cancelado.", reply_markup=ReplyKeyboardRemove())
+def clean_user_data(context: ContextTypes.DEFAULT_TYPE):
+    """Función auxiliar para limpiar los datos temporales del usuario."""
     if 'report_data' in context.user_data:
         del context.user_data['report_data']
+    if 'config_user_id' in context.user_data:
+        del context.user_data['config_user_id']
+    if 'channel_id' in context.user_data:
+        del context.user_data['channel_id']
+
+async def cancel_any_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("❌ Proceso cancelado.", reply_markup=ReplyKeyboardRemove())
+    clean_user_data(context)
     return ConversationHandler.END
 
 # --- FLUJO DE REPORTE GUIADO (NUEVA VERSIÓN) ---
@@ -471,8 +498,7 @@ async def process_guided_report_photo(update: Update, context: ContextTypes.DEFA
     else:
         await update.message.reply_text("❌ Hubo un error en el reporte. Por favor, inténtalo de nuevo con el comando /reportar en el grupo.")
     
-    if 'report_data' in context.user_data:
-        del context.user_data['report_data']
+    clean_user_data(context)
     return ConversationHandler.END
 
 # --- FUNCIONES ADICIONALES ---
@@ -654,7 +680,7 @@ def main() -> None:
                 MessageHandler(filters.Regex('^Volver$'), handle_back_button),
             ],
             GET_CHANNEL_ID_FROM_FORWARD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_channel_id_from_forward)
+                MessageHandler(filters.TEXT & ~filters.COMMAND | filters.FORWARDED, get_channel_id_from_forward)
             ],
             GET_ADMINS_IDS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_admins_ids)
@@ -665,7 +691,10 @@ def main() -> None:
                 MessageHandler(filters.Regex('^Herramientas de Administrador$'), handle_admin_tools_button),
             ],
         },
-        fallbacks=[CommandHandler('cancel', cancel_any_flow)],
+        fallbacks=[
+            CommandHandler('cancel', cancel_any_flow),
+            MessageHandler(filters.Regex('^Volver$'), handle_back_button), # Maneja el botón 'Volver' en cualquier estado del main_handler
+        ],
         allow_reentry=True,
     )
 
@@ -702,5 +731,8 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-
-    main()
+    # La máquina virtual necesita un archivo .env con el token para funcionar
+    if BOT_TOKEN:
+        main()
+    else:
+        logging.error("No se pudo iniciar el bot. Por favor, asegúrate de tener tu BOT_TOKEN en el archivo .env")
