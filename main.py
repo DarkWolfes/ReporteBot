@@ -251,23 +251,27 @@ async def handle_reconfig_confirmation(update: Update, context: ContextTypes.DEF
 
 async def get_channel_id_from_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     channel_id = None
-    text = update.message.text
     
-    # 1. Método más seguro: Reenvío de un mensaje del canal
-    if update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
-        channel_id = update.message.forward_from_chat.id
+    # 1. Método más seguro: Si el mensaje es un reenvío, obtenemos la ID directamente.
+    if update.message.forward_from_chat:
+        if update.message.forward_from_chat.type == 'channel':
+            channel_id = update.message.forward_from_chat.id
     
-    elif text:
-        # 2. Si el usuario envía solo el ID numérico
+    # 2. Si no es un reenvío, revisamos si es texto (ID numérica o URL).
+    elif update.message.text:
+        text = update.message.text
+        
+        # Intenta obtener el ID si es un número
         if re.match(r"^-?\d+$", text):
             channel_id = int(text)
         
-        # 3. Si el usuario envía un enlace de mensaje de un canal privado
-        match_url = re.search(r"t\.me\/c\/(\d+)\/(\d+)", text)
-        if match_url:
-            channel_id_str = match_url.group(1)
-            channel_id = int(f"-100{channel_id_str}")
-    
+        # Intenta obtener el ID si es un enlace de mensaje
+        else:
+            match_url = re.search(r"t\.me\/c\/(\d+)\/(\d+)", text)
+            if match_url:
+                channel_id_str = match_url.group(1)
+                channel_id = int(f"-100{channel_id_str}")
+
     if not channel_id:
         await update.message.reply_text(
             "❌ ¡Error! Por favor, asegúrate de reenviar un mensaje del canal, de enviar el ID numérico, o de pegar un enlace de un mensaje del canal."
