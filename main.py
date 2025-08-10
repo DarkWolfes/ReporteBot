@@ -217,7 +217,7 @@ async def handle_config_bot_button(update: Update, context: ContextTypes.DEFAULT
     mensaje = (
         "<b>Paso 1: Configurar canal de reportes</b>\n\n"
         "Crea un canal de Telegram (público o privado) y añade este bot como **administrador**.\n"
-        "Luego, en el canal, reenvía cualquier mensaje del bot y pégalo aquí para que pueda obtener la ID del canal."
+        "Luego, en el canal, reenvía cualquier mensaje del bot o pega el enlace de un mensaje del canal para que pueda obtener la ID."
     )
     await update.message.reply_text(mensaje, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     return GET_CHANNEL_ID_FROM_FORWARD
@@ -239,7 +239,7 @@ async def handle_reconfig_confirmation(update: Update, context: ContextTypes.DEF
         mensaje = (
             "<b>Paso 1: Configurar canal de reportes</b>\n\n"
             "Crea un canal de Telegram (público o privado) y añade este bot como **administrador**.\n"
-            "Luego, en el canal, reenvía cualquier mensaje del bot y pégalo aquí para que pueda obtener la ID del canal."
+            "Luego, en el canal, reenvía cualquier mensaje del bot o pega el enlace de un mensaje del canal para que pueda obtener la ID."
         )
         await context.bot.send_message(chat_id=update.effective_chat.id, text=mensaje, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         return GET_CHANNEL_ID_FROM_FORWARD
@@ -252,27 +252,28 @@ async def handle_reconfig_confirmation(update: Update, context: ContextTypes.DEF
 async def get_channel_id_from_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     channel_id = None
     text = update.message.text
+    
     if text:
-        # Lógica mejorada para obtener el ID de canal de un reenvío
+        # Lógica para obtener el ID de un mensaje reenviado o URL
         try:
-            # Intenta obtener el ID de un mensaje reenviado. 
-            # (El chat reenviado aparece como 'forward_from_chat' si es un canal)
+            # 1. Intenta obtener el ID de un mensaje reenviado.
             if update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
                 channel_id = update.message.forward_from_chat.id
-            # Si el usuario simplemente pega el ID numérico
+            # 2. Si el usuario simplemente pega el ID numérico
             elif re.match(r"^-?\d+$", text):
                 channel_id = int(text)
-            # Para enlaces de mensaje de canal, extrae el ID
+            # 3. Nueva mejora: Para enlaces de mensaje de canal, extrae el ID
             elif re.search(r"t\.me\/c\/(-?\d+)\/(\d+)", text):
                 match = re.search(r"t\.me\/c\/(-?\d+)\/(\d+)", text)
                 channel_id_str = match.group(1)
+                # El ID de los enlaces de canal no incluye el -100, se lo añadimos
                 channel_id = int(f"-100{channel_id_str}")
         except Exception:
             channel_id = None
 
     if not channel_id:
         await update.message.reply_text(
-            "❌ ¡Error! Por favor, asegúrate de reenviar un mensaje del canal o de enviar el ID numérico del canal."
+            "❌ ¡Error! Por favor, asegúrate de reenviar un mensaje del canal, de enviar el ID numérico, o de pegar un enlace de un mensaje del canal."
         )
         return GET_CHANNEL_ID_FROM_FORWARD
 
@@ -282,12 +283,13 @@ async def get_channel_id_from_forward(update: Update, context: ContextTypes.DEFA
         return ConversationHandler.END
 
     context.user_data['channel_id'] = channel_id
-
+    
     await context.bot.send_message(chat_id=config_user_id, text=
         "✅ ¡Canal configurado correctamente!\n\n"
         "<b>Paso 2: Definir administradores</b>\n\n"
         "Ahora, por favor, dime quiénes son los administradores. Envía los IDs de usuario de cada administrador separados por comas.\n"
-        "Si no quieres añadir más administradores, escribe 'ninguno'. **Recuerda que tú, como creador, ya eres administrador.**"
+        "Si no quieres añadir más administradores, escribe 'ninguno'. **Recuerda que tú, como creador, ya eres administrador.**",
+        parse_mode="HTML"
     )
     return GET_ADMINS_IDS
 
