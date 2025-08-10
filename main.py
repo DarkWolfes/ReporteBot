@@ -253,24 +253,21 @@ async def get_channel_id_from_forward(update: Update, context: ContextTypes.DEFA
     channel_id = None
     text = update.message.text
     
-    if text:
-        # Lógica para obtener el ID de un mensaje reenviado o URL
-        try:
-            # 1. Intenta obtener el ID de un mensaje reenviado.
-            if update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
-                channel_id = update.message.forward_from_chat.id
-            # 2. Si el usuario simplemente pega el ID numérico
-            elif re.match(r"^-?\d+$", text):
-                channel_id = int(text)
-            # 3. Nueva mejora: Para enlaces de mensaje de canal, extrae el ID
-            elif re.search(r"t\.me\/c\/(-?\d+)\/(\d+)", text):
-                match = re.search(r"t\.me\/c\/(-?\d+)\/(\d+)", text)
-                channel_id_str = match.group(1)
-                # El ID de los enlaces de canal no incluye el -100, se lo añadimos
-                channel_id = int(f"-100{channel_id_str}")
-        except Exception:
-            channel_id = None
-
+    # 1. Método más seguro: Reenvío de un mensaje del canal
+    if update.message.forward_from_chat and update.message.forward_from_chat.type == 'channel':
+        channel_id = update.message.forward_from_chat.id
+    
+    elif text:
+        # 2. Si el usuario envía solo el ID numérico
+        if re.match(r"^-?\d+$", text):
+            channel_id = int(text)
+        
+        # 3. Si el usuario envía un enlace de mensaje de un canal privado
+        match_url = re.search(r"t\.me\/c\/(\d+)\/(\d+)", text)
+        if match_url:
+            channel_id_str = match_url.group(1)
+            channel_id = int(f"-100{channel_id_str}")
+    
     if not channel_id:
         await update.message.reply_text(
             "❌ ¡Error! Por favor, asegúrate de reenviar un mensaje del canal, de enviar el ID numérico, o de pegar un enlace de un mensaje del canal."
