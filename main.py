@@ -252,10 +252,12 @@ async def handle_reconfig_confirmation(update: Update, context: ContextTypes.DEF
 async def get_channel_id_from_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     channel_id = None
     
+    # Usamos getattr para obtener el atributo de forma segura, evitando errores si no existe
+    forwarded_chat = getattr(update.message, 'forward_from_chat', None)
+    
     # 1. Método más seguro: Si el mensaje es un reenvío, obtenemos la ID directamente.
-    if update.message.forward_from_chat:
-        if update.message.forward_from_chat.type == 'channel':
-            channel_id = update.message.forward_from_chat.id
+    if forwarded_chat and forwarded_chat.type == 'channel':
+        channel_id = forwarded_chat.id
     
     # 2. Si no es un reenvío, revisamos si es texto (ID numérica o URL).
     elif update.message.text:
